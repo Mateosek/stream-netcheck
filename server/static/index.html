@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream-NetCheck // QoS & Bufferbloat Diagnostic</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=1.7">
+</head>
+
+
+
+
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="badge">RFC 3550 // ITU-T Y.1541</div>
+            <h1>STREAM-NETCHECK</h1>
+            <p class="subtitle">Diagnostyka jakości łącza, jittera i bufferbloatu dla Cloud Gamingu</p>
+        </header>
+
+        <!-- START PANEL -->
+        <div class="card action-card" id="action-panel">
+            <div class="panel-intro-title">Wybierz tryb pomiaru</div>
+            <div class="test-modes-grid">
+
+                <div class="mode-card" onclick="startDiagnostic('quick')">
+                    <div class="mode-header">
+                        <div class="mode-icon-box">⚡</div>
+                        <div>
+                            <div class="mode-title">Szybki test</div>
+                            <span class="mode-pill">~4 sekundy</span>
+                        </div>
+                    </div>
+                    <p class="mode-desc">Błyskawiczna weryfikacja opóźnienia bazowego, jittera, bufferbloatu i trasy tunelu NetBird (P2P vs Relay).</p>
+                    <button class="btn-mode">Uruchom szybki test</button>
+                </div>
+
+                <div class="mode-card mode-full" onclick="startDiagnostic('full')">
+                    <div class="mode-header">
+                        <div class="mode-icon-box mode-icon-full">📶</div>
+                        <div>
+                            <div class="mode-title">Pełny test stabilności</div>
+                            <span class="mode-pill pill-full">30 sekund // wykres na żywo</span>
+                        </div>
+                    </div>
+                    <p class="mode-desc">Dłuższy profil pomiarowy z wykresem na żywo. Identyfikuje cykliczne skoki pingu (RTT), gubienie ramek Wi-Fi i nagłe spadki jakości sygnału.</p>
+                    <button class="btn-mode btn-mode-full">Uruchom pełny test</button>
+                </div>
+            </div>
+            <div class="hint center" style="margin-top: 18px;">Wskazówka: jeśli grasz przez Wi-Fi i co jakiś czas odczuwasz przycięcia obrazu, wybierz pełny test.</div>
+        </div>
+
+
+
+
+
+
+        <!-- PROGRESS BAR & LIVE CHART -->
+        <div class="card progress-card hidden" id="progress-panel">
+            <div class="progress-header">
+                <span id="progress-status">Inicjalizacja testu...</span>
+                <span id="progress-pct">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-fill"></div>
+            </div>
+            <div class="live-ticker" id="live-ticker">Oczekiwanie na pakiety...</div>
+            <div class="chart-container" id="chart-container" style="display:none; margin-top:16px;">
+                <div class="chart-header">
+                    <span>Wykres opóźnień w czasie rzeczywistym (RTT)</span>
+                    <span id="live-rtt-now" class="mono text-accent">-- ms</span>
+                </div>
+                <canvas id="live-chart" width="760" height="120"></canvas>
+            </div>
+        </div>
+
+
+        <!-- RESULTS DASHBOARD -->
+        <div class="results-container hidden" id="results-panel">
+            <!-- VERDICT CARD -->
+            <div class="card verdict-card" id="verdict-card">
+                <div class="verdict-header">
+                    <div class="grade-badge" id="grade-badge">A</div>
+                    <div class="verdict-titles">
+                        <div class="tier-name" id="tier-name">Optimal (4K @ 60 FPS)</div>
+                        <div class="verdict-summary" id="verdict-summary">Połączenie jest stabilne.</div>
+                    </div>
+                </div>
+                <div class="recommendations-box">
+                    <div class="rec-title">💡 Analiza i wskazówki:</div>
+                    <ul class="rec-list" id="rec-list"></ul>
+                </div>
+            </div>
+
+            <!-- METRICS GRID -->
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-label">Średni ping (RTT)</div>
+                    <div class="metric-value"><span id="m-avg-rtt">0.0</span> <span class="unit">ms</span></div>
+                    <div class="metric-sub">Min: <span id="m-min-rtt">0</span> ms | Max: <span id="m-max-rtt">0</span> ms</div>
+                </div>
+
+                <div class="metric-box">
+                    <div class="metric-label">Jitter (RFC 3550)</div>
+                    <div class="metric-value"><span id="m-jitter">0.0</span> <span class="unit">ms</span></div>
+                    <div class="metric-sub">Wahania: ±<span id="m-std-dev">0</span> ms</div>
+                </div>
+
+
+
+                <div class="metric-box">
+                    <div class="metric-label">Utrata pakietów</div>
+                    <div class="metric-value"><span id="m-loss">0.0</span> <span class="unit">%</span></div>
+                    <div class="metric-sub">Odebrano: <span id="m-rec-count">0</span> / <span id="m-sent-count">0</span></div>
+                </div>
+
+                <div class="metric-box">
+                    <div class="metric-label">Bufferbloat (+Δ)</div>
+                    <div class="metric-value"><span id="m-bufferbloat">0.0</span> <span class="unit">ms</span></div>
+                    <div class="metric-sub">Wzrost pingu pod obciążeniem</div>
+                </div>
+
+                <div class="metric-box">
+                    <div class="metric-label">Przepustowość</div>
+                    <div class="metric-value"><span id="m-speed">--</span> <span class="unit">Mbps</span></div>
+                    <div class="metric-sub">Test pobierania mikro-strumienia</div>
+                </div>
+
+                <div class="metric-box">
+                    <div class="metric-label">Tunel NetBird</div>
+                    <div class="metric-value" id="m-netbird-mode">P2P</div>
+                    <div class="metric-sub">Trasa: <span id="m-netbird-sub">WireGuard Direct</span></div>
+                </div>
+            </div>
+
+
+            <div class="center" style="margin-top: 24px;">
+                <button class="btn-secondary" onclick="resetTest()">Powtórz test</button>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <span>Twierdza Cloud Gaming Ecosystem // stream-netcheck v1.0.0</span>
+        </footer>
+    </div>
+
+    <script src="/static/probe.js?v=1.4"></script>
+</body>
+
+
+
+
+</html>
