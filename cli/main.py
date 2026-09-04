@@ -74,9 +74,9 @@ async def run_cli_diagnostic(host: str, probe_count: int = 30, output_json: bool
 
             ping_task = asyncio.create_task(background_loaded_ping())
             
-            # Download 2MB chunk
+            # Download 8MB chunk
             start_dl = time.time()
-            chunk_url = f"{http_url}/api/bandwidth/chunk?size_mb=2.0&t={time.time()}"
+            chunk_url = f"{http_url}/api/bandwidth/chunk?size_mb=8.0&t={time.time()}"
             speed_mbps = None
             try:
                 req = urllib.request.Request(chunk_url)
@@ -108,12 +108,13 @@ async def run_cli_diagnostic(host: str, probe_count: int = 30, output_json: bool
         req = urllib.request.Request(
             eval_url,
             data=json.dumps(eval_payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
+            method="POST"
         )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"Error submitting telemetry to evaluation endpoint: {e}", file=sys.stderr)
+        print(f"Error: Failed to evaluate SLA: {e}", file=sys.stderr)
         sys.exit(1)
 
     if output_json:
@@ -141,6 +142,26 @@ async def run_cli_diagnostic(host: str, probe_count: int = 30, output_json: bool
     print(f" • Estimated Throughput:    {sp_str}")
     nb_mode = "Direct P2P (WireGuard)" if nb['is_direct_p2p'] else nb['connection_type']
     print(f" • NetBird Mesh Route:      {nb_mode}")
+
+    if "moonlight_config" in result and result["moonlight_config"]:
+        cfg = result["moonlight_config"]
+        cp = cfg["cinematic_profile"]
+        print("-" * 64)
+        print(" MOONLIGHT / SUNSHINE CONFIGURATION ADVISOR")
+        print("-" * 64)
+        print(f" • Recommended Resolution:  {cp['resolution']}")
+        print(f" • Target Bitrate Slider:    {cp['target_bitrate_mbps']} Mbps (Range: {cp['safe_bitrate_range']})")
+        print(f" • Recommended Codec:        {cp['codec']} (Quality Score: {cp['score']})")
+        if cfg.get("competitive_profile"):
+            comp = cfg["competitive_profile"]
+            print(f" • Competitive Mode (120Hz): {comp['resolution']} ({comp['codec']})")
+        else:
+            print(" • Competitive Mode (120Hz): Disabled (RTT > 30 ms)")
+        print(f" • Forward Error Corr (FEC): {cfg['recommended_fec_percentage']}%")
+        print(f" • Frame Pacing (Smooth):    {'ENABLED' if cfg['frame_pacing'] else 'OFF'}")
+        print(f" • Confidence Level:         {cfg['confidence_level']}")
+        print(f" • Hardware Notice:          {cfg['hardware_note']}")
+
     print("-" * 64)
     print(" Recommendations:")
     for r in sla['recommendations_en']:

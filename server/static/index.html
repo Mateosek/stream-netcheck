@@ -7,8 +7,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=1.7">
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
 </head>
+
 
 
 
@@ -136,6 +137,71 @@
                 </div>
             </div>
 
+            <!-- MOONLIGHT / SUNSHINE PRESET ADVISOR -->
+            <div class="moonlight-card" id="moonlight-card">
+                <div class="moonlight-header">
+                    <div class="moonlight-title">
+                        <span>🎮 Konfiguracja Moonlight / Sunshine</span>
+                    </div>
+                    <div class="moonlight-badges">
+                        <span class="m-badge" id="m-badge-confidence">WIARYGODNOŚĆ: WYSOKA</span>
+                        <span class="m-badge" id="m-badge-fec">FEC: 0%</span>
+                        <span class="m-badge" id="m-badge-pacing">PACING: WYŁ</span>
+                    </div>
+                </div>
+
+                <div class="moonlight-tabs">
+                    <button class="m-tab-btn active" id="tab-btn-cinematic" onclick="switchMoonlightTab('cinematic')">Jakość (60 FPS)</button>
+                    <button class="m-tab-btn" id="tab-btn-competitive" onclick="switchMoonlightTab('competitive')">E-sport (120 FPS)</button>
+                </div>
+
+                <!-- TAB 1: CINEMATIC -->
+                <div id="tab-content-cinematic">
+                    <div class="codec-pills">
+                        <button class="codec-btn active" id="codec-btn-av1" onclick="selectCinematicCodec('AV1')">AV1 (Zalecany)</button>
+                        <button class="codec-btn" id="codec-btn-hevc" onclick="selectCinematicCodec('HEVC')">HEVC (H.265)</button>
+                        <button class="codec-btn" id="codec-btn-h264" onclick="selectCinematicCodec('H.264')">H.264</button>
+                    </div>
+                    <div class="preset-display-grid">
+                        <div class="preset-item">
+                            <div class="preset-label">Rozdzielczość</div>
+                            <div class="preset-val" id="preset-cinematic-res">1440p (2560x1440) @ 60 FPS</div>
+                            <div class="preset-sub">Częstotliwość: 60 Hz</div>
+                        </div>
+                        <div class="preset-item">
+                            <div class="preset-label">Suwak Bitrate (Moonlight)</div>
+                            <div class="preset-val" style="color: var(--accent);"><span id="preset-cinematic-bitrate">45</span> Mbps</div>
+                            <div class="preset-sub">Bezpieczny zakres: <span id="preset-cinematic-range">40 - 45 Mbps</span></div>
+                        </div>
+                    </div>
+                    <div class="hardware-notice" id="preset-hardware-note">
+                        Rekomendowany profil AV1 wymaga karty graficznej lub układu SoC z obsługą sprzętowego dekodowania AV1 na urządzeniu klienckim. W przypadku braku wsparcia przełącz na profil HEVC.
+                    </div>
+                </div>
+
+                <!-- TAB 2: COMPETITIVE -->
+                <div id="tab-content-competitive" class="hidden">
+                    <div class="preset-display-grid" id="comp-grid">
+                        <div class="preset-item">
+                            <div class="preset-label">Rozdzielczość E-sportowa</div>
+                            <div class="preset-val" id="preset-comp-res">1080p (1920x1080) @ 120 FPS</div>
+                            <div class="preset-sub">Częstotliwość: 120 Hz</div>
+                        </div>
+                        <div class="preset-item">
+                            <div class="preset-label">Suwak Bitrate</div>
+                            <div class="preset-val" style="color: var(--accent);"><span id="preset-comp-bitrate">45</span> Mbps</div>
+                            <div class="preset-sub">Kodek: <span id="preset-comp-codec">AV1</span></div>
+                        </div>
+                    </div>
+                    <div class="hardware-notice" id="comp-status-note">
+                        Tryb e-sportowy (120 FPS) aktywny.
+                    </div>
+                </div>
+
+                <div class="reasoning-box" id="preset-reasoning">
+                    Uzasadnienie inżynierskie...
+                </div>
+            </div>
 
             <div class="center" style="margin-top: 24px;">
                 <button class="btn-secondary" onclick="resetTest()">Powtórz test</button>
@@ -147,8 +213,9 @@
         </footer>
     </div>
 
-    <script src="/static/probe.js?v=1.4"></script>
+    <script src="/static/probe.js?v=2.0"></script>
 </body>
+
 
 
 

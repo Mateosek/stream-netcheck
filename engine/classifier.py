@@ -6,21 +6,53 @@ interactive streaming (Moonlight / Sunshine / GeForce NOW) and provides
 actionable root-cause diagnosis.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import List, Optional
 from engine.qos import QoSMetrics
 from engine.netbird import NetBirdPeerInfo
+from engine.advisor import MoonlightConfig, evaluate_moonlight_config
+
+
+def classify_sla(
+    rtt_ms: float,
+    jitter_ms: float,
+    packet_loss_pct: float,
+    bufferbloat_ms: float,
+    is_relayed: bool = False,
+    has_netbird_context: bool = True
+) -> str:
+    """
+    Classifies network health into defined SLA grades based on latency, jitter, loss, and bloat.
+    """
+    relayed_cond = is_relayed if has_netbird_context else False
+    if relayed_cond or packet_loss_pct > 2.5 or jitter_ms > 12.0 or bufferbloat_ms > 60.0:
+        return "Grade D: Degraded / Relayed"
+
+    if (rtt_ms <= 25.0 and jitter_ms <= 3.5 and 
+        packet_loss_pct == 0.0 and bufferbloat_ms <= 15.0):
+        return "Grade A: Ultra-Low Latency"
+
+    if (rtt_ms <= 45.0 and jitter_ms <= 6.0 and 
+        packet_loss_pct <= 0.5 and bufferbloat_ms <= 30.0):
+        return "Grade B: Stable Interactive"
+
+    return "Grade C: Functional / High Latency"
 
 
 @dataclass
 class SLARating:
     grade: str            # "A", "B", "C", or "F"
-    tier_name: str        # "Optimal (4K/60)", "Good (1080p/60)", "Playable (720p)", "Degraded"
+    tier_name: str        # e.g. "Ultra-Low Latency", "Stable Interactive"
     status_color: str     # "green", "yellow", "red"
     summary_pl: str
     summary_en: str
     recommendations_pl: List[str]
     recommendations_en: List[str]
+    moonlight_config: Optional[MoonlightConfig] = None
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        return data
 
 
 class SLAClassifier:
@@ -40,7 +72,7 @@ class SLAClassifier:
         is_relayed = netbird_info is not None and netbird_info.connection_type.lower() == "relayed"
         bufferbloat = metrics.bufferbloat_delta_ms or 0.0
 
-        # Detect specific Root Causes
+        # Root Cause Analysis (RCA)
         if metrics.packet_loss_pct > 1.5:
             rec_pl.append(f"Wykryto utratę pakietów ({metrics.packet_loss_pct}%). Może powodować zacięcia obrazu i artefakty.")
             rec_en.append(f"Significant packet loss detected ({metrics.packet_loss_pct}%). Video stream will suffer artifacts.")
@@ -53,9 +85,8 @@ class SLAClassifier:
             rec_en.append(f"Moderate jitter ({metrics.rfc3550_jitter_ms} ms). Ensure you are connected to a 5 GHz Wi-Fi band near the router.")
 
         if bufferbloat > 40.0:
-            rec_pl.append(f"Wykryto bufferbloat na routerze (+{bufferbloat} ms pod obciążeniem). Obniż bitrate w Moonlight (np. do 25 Mbps), aby nie zapychać kolejki routera.")
+            rec_pl.append(f"Wykryto bufferbloat na routerze (+{bufferbloat} ms pod obciążeniem). Obniż bitrate w Moonlight, aby nie zapychać kolejki routera.")
             rec_en.append(f"Bufferbloat detected on the local router (+{bufferbloat} ms loaded delta). Lower the Moonlight bitrate to avoid buffer congestion.")
-
 
         # Detect Weak Wi-Fi / Low RSSI frame retries & intermittent spikes
         rtt_spread = metrics.max_rtt_ms - metrics.min_rtt_ms
@@ -68,79 +99,73 @@ class SLAClassifier:
             rec_pl.append("Połączenie NetBird korzysta z serwera pośredniczącego (Relay/TURN), a nie bezpośredniego P2P. Dodaje to sztuczne opóźnienie.")
             rec_en.append("NetBird is using a cloud Relay (TURN) rather than direct WireGuard P2P. Check NAT/firewall settings to allow direct UDP.")
 
+        # Evaluate Moonlight preset advisor
+        moonlight_cfg = evaluate_moonlight_config(
+            throughput_mbps=metrics.throughput_mbps or 50.0,
+            rtt_ms=metrics.avg_rtt_ms,
+            jitter_ms=metrics.rfc3550_jitter_ms,
+            packet_loss_pct=metrics.packet_loss_pct,
+            bufferbloat_ms=bufferbloat,
+            is_relayed=is_relayed,
+            has_netbird_context=(netbird_info is not None)
+        )
 
-        # If relayed, the connection is degraded by definition due to intermediate hops
-        if is_relayed:
-            return SLARating(
-                grade="F",
-                tier_name="Degraded (Relay Fallback)",
-                status_color="red",
-                summary_pl="Połączenie nie osiąga bezpośredniej trasy P2P i leci przez serwer pośredniczący (Relay). Oczekiwany wysoki input lag.",
-                summary_en="Connection failed to establish direct WireGuard P2P and fell back to cloud Relay/TURN.",
-                recommendations_pl=rec_pl or ["Sprawdź czy router nie blokuje portów UDP WireGuarda lub zrestartuj klienta NetBird."],
-                recommendations_en=rec_en or ["Ensure router allows direct UDP hole punching or restart NetBird daemon."],
-            )
+        # Standard SLA classification string
+        sla_class = classify_sla(
+            rtt_ms=metrics.avg_rtt_ms,
+            jitter_ms=metrics.rfc3550_jitter_ms,
+            packet_loss_pct=metrics.packet_loss_pct,
+            bufferbloat_ms=bufferbloat,
+            is_relayed=is_relayed,
+            has_netbird_context=(netbird_info is not None)
+        )
 
-        # GRADE A: RTT < 25ms, Jitter < 3.5ms, Loss == 0%, Bufferbloat < 20ms, No Spikes
-        if (
-            metrics.avg_rtt_ms < 25.0
-            and metrics.rfc3550_jitter_ms < 3.5
-            and metrics.packet_loss_pct == 0.0
-            and bufferbloat < 20.0
-            and not has_wifi_spikes
-        ):
+        # If Wi-Fi spikes detected, ensure grade is not A or B
+        if has_wifi_spikes and "Grade A" in sla_class or "Grade B" in sla_class:
+            sla_class = "Grade C: Functional / High Latency"
+
+        # Map to SLARating
+        if "Grade A" in sla_class:
             return SLARating(
                 grade="A",
-                tier_name="Optimal (4K @ 60 FPS)",
+                tier_name="Ultra-Low Latency",
                 status_color="green",
-                summary_pl="Świetne połączenie. Idealne warunki do grania w 4K przy 60 FPS z minimalnym opóźnieniem.",
-                summary_en="Optimal telecommunication parameters. Flawless 4K/60FPS streaming with ultra-low latency.",
-                recommendations_pl=rec_pl or ["Łącze jest w pełni stabilne. Możesz grać na najwyższych ustawieniach bitrate."],
-                recommendations_en=rec_en or ["Network is fully stable. Safe to stream at maximum bitrate settings."],
+                summary_pl="Świetne połączenie. Znakomite warunki do gamingu z minimalnym opóźnieniem wejściowym.",
+                summary_en="Optimal telecommunication parameters. Flawless cloud gaming with ultra-low latency.",
+                recommendations_pl=rec_pl or ["Łącze jest w pełni stabilne."],
+                recommendations_en=rec_en or ["Network is fully stable."],
+                moonlight_config=moonlight_cfg
             )
-
-        # GRADE B: RTT < 45ms, Jitter < 8ms, Loss < 0.5%, Bufferbloat < 50ms, No Spikes
-        if (
-            metrics.avg_rtt_ms < 45.0
-            and metrics.rfc3550_jitter_ms < 8.0
-            and metrics.packet_loss_pct <= 0.5
-            and bufferbloat < 50.0
-            and not has_wifi_spikes
-        ):
-
+        elif "Grade B" in sla_class:
             return SLARating(
                 grade="B",
-                tier_name="Good (1080p @ 60 FPS)",
+                tier_name="Stable Interactive",
                 status_color="green",
-                summary_pl="Dobre i stabilne połączenie. Płynna rozgrywka w 1080p przy 60 FPS.",
-                summary_en="Good and stable connection. Smooth gameplay expected at 1080p/60FPS.",
-                recommendations_pl=rec_pl or ["Standardowa jakość streamingowa. Rekomendowany bitrate: 30-40 Mbps."],
-                recommendations_en=rec_en or ["Standard streaming quality. Recommended bitrate: 30-40 Mbps."],
+                summary_pl="Dobre i stabilne połączenie. Płynna rozgrywka interaktywna.",
+                summary_en="Good and stable connection. Smooth interactive gameplay expected.",
+                recommendations_pl=rec_pl or ["Dobra stabilność łącza."],
+                recommendations_en=rec_en or ["Good overall connection stability."],
+                moonlight_config=moonlight_cfg
             )
-
-        # GRADE C: RTT < 75ms, Jitter < 15ms, Loss < 2.0%
-        if (
-            metrics.avg_rtt_ms < 75.0
-            and metrics.rfc3550_jitter_ms < 15.0
-            and metrics.packet_loss_pct <= 2.0
-        ):
+        elif "Grade C" in sla_class:
             return SLARating(
                 grade="C",
-                tier_name="Playable (720p / Turn-based)",
+                tier_name="Functional / High Latency",
                 status_color="yellow",
-                summary_pl="Umiarkowane połączenie. Gry zręcznościowe/FPS mogą odczuwać lekki input lag. Dobre dla gier RPG i turowych.",
-                summary_en="Moderate connection quality. Action/FPS titles might feel input delay. Suitable for RPG or turn-based titles.",
-                recommendations_pl=rec_pl or ["Zalecane obniżenie rozdzielczości do 720p lub ograniczenie bitrate do 15-20 Mbps."],
-                recommendations_en=rec_en or ["Lower resolution to 720p or cap bitrate to 15-20 Mbps."],
+                summary_pl="Umiarkowane parametry. W grach dynamicznych/FPS może być wyczuwalny lekki input lag.",
+                summary_en="Moderate connection quality. Action/FPS titles might feel latency delay.",
+                recommendations_pl=rec_pl or ["Zalecane dostosowanie ustawień."],
+                recommendations_en=rec_en or ["Adjust streaming settings to compensate for latency."],
+                moonlight_config=moonlight_cfg
             )
-
-        # GRADE F: Degraded
-        return SLARating(
-            grade="F",
-            tier_name="Degraded (Unstable)",
-            status_color="red",
-            summary_pl="Krytyczna niestabilność łącza. Rozgrywka będzie rwać, wystąpi wysoki input lag lub widoczne artefakty.",
-            summary_en="Degraded connection. Gameplay will suffer stuttering, high input lag, and severe frame drops.",
-            recommendations_pl=rec_pl or ["Sprawdź połączenie Wi-Fi, zrestartuj router lub sprawdź status tunelu NetBird."],
-            recommendations_en=rec_en or ["Check Wi-Fi connection, reboot gateway router, or inspect NetBird tunnel status."],
-        )
+        else:
+            return SLARating(
+                grade="F",
+                tier_name="Degraded / Relayed",
+                status_color="red",
+                summary_pl="Niestabilne połączenie lub trasa przez serwer pośredniczący (Relay). Oczekiwany wysoki input lag.",
+                summary_en="Degraded connection or routed via cloud Relay/TURN. Expect high input lag or stutter.",
+                recommendations_pl=rec_pl or ["Sprawdź stan tunelu NetBird lub połączenie Wi-Fi."],
+                recommendations_en=rec_en or ["Check NetBird tunnel status or local network link."],
+                moonlight_config=moonlight_cfg
+            )

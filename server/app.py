@@ -86,7 +86,7 @@ async def websocket_probe(websocket: WebSocket):
 
 
 @app.get("/api/bandwidth/chunk")
-def download_chunk(size_mb: float = Query(2.0, ge=0.5, le=10.0)):
+def download_chunk(size_mb: float = Query(8.0, ge=0.5, le=25.0)):
     """
     Generates a deterministic raw binary chunk to measure client download throughput
     and induce network load for bufferbloat evaluation.
@@ -179,5 +179,7 @@ def evaluate_network(req: DiagnosticRequest, request: Request):
             "summary_en": rating.summary_en,
             "recommendations_pl": rating.recommendations_pl,
             "recommendations_en": rating.recommendations_en,
-        }
+        },
+        "moonlight_config": rating.moonlight_config.to_dict() if rating.moonlight_config else None
     }
+

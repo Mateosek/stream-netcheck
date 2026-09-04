@@ -233,7 +233,7 @@ function runIdleProbePhase() {
 }
 
 async function runBandwidthAndBufferbloatPhase() {
-    setProgress(70, "Faza 2/2: Test pod obciążeniem i wykrywanie bufferbloatu...", "Pobieranie mikro-strumienia (2 MB)...");
+    setProgress(70, "Faza 2/2: Test pod obciążeniem i wykrywanie bufferbloatu...", "Pobieranie strumienia pomiarowego (8 MB)...");
     loadedProbes = [];
 
 
@@ -269,7 +269,7 @@ async function runBandwidthAndBufferbloatPhase() {
     let speedMbps = null;
 
     try {
-        const res = await fetch(`/api/bandwidth/chunk?size_mb=2.0&t=${Date.now()}`, { cache: "no-store" });
+        const res = await fetch(`/api/bandwidth/chunk?size_mb=8.0&t=${Date.now()}`, { cache: "no-store" });
         const blob = await res.blob();
         const durationSec = (performance.now() - startDownload) / 1000.0;
         const bitsLoaded = blob.size * 8.0;
@@ -277,6 +277,7 @@ async function runBandwidthAndBufferbloatPhase() {
     } catch (e) {
         console.warn("Bandwidth probe failed:", e);
     }
+
 
     clearInterval(loadedInterval);
     setProgress(92, "Klasyfikacja SLA i analiza przyczyn...", "Obliczanie parametrów RFC 3550 i ITU-T Y.1541...");
@@ -381,4 +382,111 @@ function renderReport(report) {
         nbModeEl.style.color = "var(--text-main)";
         nbSubEl.innerText = nb.connected ? "Połączony" : "Bezpośrednie IP";
     }
+
+    // Moonlight / Sunshine Configuration Advisor
+    if (report.moonlight_config) {
+        renderMoonlightAdvisor(report.moonlight_config);
+    }
 }
+
+let currentMoonlightConfig = null;
+let activeCinematicCodec = "AV1";
+
+function renderMoonlightAdvisor(cfg) {
+    currentMoonlightConfig = cfg;
+    activeCinematicCodec = "AV1";
+
+    const mlCard = document.getElementById("moonlight-card");
+    if (!mlCard) return;
+    mlCard.classList.remove("hidden");
+
+    // Badges
+    const confBadge = document.getElementById("m-badge-confidence");
+    if (confBadge) {
+        confBadge.className = `m-badge badge-confidence-${cfg.confidence_level.toLowerCase()}`;
+        confBadge.innerText = `WIARYGODNOŚĆ: ${cfg.confidence_level === "HIGH" ? "WYSOKA" : (cfg.confidence_level === "MEDIUM" ? "ŚREDNIA" : "NISKA")}`;
+    }
+
+    const fecBadge = document.getElementById("m-badge-fec");
+    if (fecBadge) {
+        fecBadge.innerText = `FEC: ${cfg.recommended_fec_percentage}%`;
+    }
+
+    const pacingBadge = document.getElementById("m-badge-pacing");
+    if (pacingBadge) {
+        pacingBadge.innerText = `PACING: ${cfg.frame_pacing ? "WŁ (SMOOTH)" : "WYŁ"}`;
+        pacingBadge.style.borderColor = cfg.frame_pacing ? "var(--yellow)" : "var(--border)";
+    }
+
+    // Hardware Note & Reasoning
+    const hwNote = document.getElementById("preset-hardware-note");
+    if (hwNote) hwNote.innerText = cfg.hardware_note;
+
+    const reasoning = document.getElementById("preset-reasoning");
+    if (reasoning) reasoning.innerText = cfg.reasoning_pl;
+
+    // Render Cinematic & Competitive
+    updateCinematicDisplay();
+
+    // Competitive Mode tab setup
+    const compTabBtn = document.getElementById("tab-btn-competitive");
+    const compGrid = document.getElementById("comp-grid");
+    const compNote = document.getElementById("comp-status-note");
+
+    if (cfg.competitive_profile) {
+        if (compTabBtn) compTabBtn.style.display = "block";
+        if (compGrid) compGrid.classList.remove("hidden");
+        document.getElementById("preset-comp-res").innerText = cfg.competitive_profile.resolution;
+        document.getElementById("preset-comp-bitrate").innerText = cfg.competitive_profile.target_bitrate_mbps;
+        document.getElementById("preset-comp-codec").innerText = `${cfg.competitive_profile.codec} (${cfg.competitive_profile.safe_bitrate_range})`;
+        if (compNote) {
+            compNote.innerText = "Tryb e-sportowy (120 FPS) aktywny. Twoje opóźnienie RTT pozwala na responsywną rozgrywkę z wysokim odświeżaniem.";
+            compNote.style.borderLeftColor = "var(--green)";
+        }
+    } else {
+        if (compGrid) compGrid.classList.add("hidden");
+        if (compNote) {
+            compNote.innerText = "Niedostępny (RTT > 30 ms). Opóźnienie łącza jest zbyt wysokie na sensowną rozgrywkę w 120 FPS.";
+            compNote.style.borderLeftColor = "var(--yellow)";
+        }
+    }
+}
+
+function updateCinematicDisplay() {
+    if (!currentMoonlightConfig) return;
+    const cfg = currentMoonlightConfig;
+
+    let profile = cfg.cinematic_profile;
+    if (activeCinematicCodec === "HEVC" && cfg.fallback_hevc) {
+        profile = cfg.fallback_hevc;
+    } else if (activeCinematicCodec === "H.264" && cfg.fallback_h264) {
+        profile = cfg.fallback_h264;
+    }
+
+    document.getElementById("preset-cinematic-res").innerText = profile.resolution;
+    document.getElementById("preset-cinematic-bitrate").innerText = profile.target_bitrate_mbps;
+    document.getElementById("preset-cinematic-range").innerText = profile.safe_bitrate_range;
+
+    // Toggle button active classes
+    ["av1", "hevc", "h264"].forEach(c => {
+        const btn = document.getElementById(`codec-btn-${c}`);
+        if (btn) {
+            btn.classList.toggle("active", c.toUpperCase() === activeCinematicCodec.toUpperCase());
+        }
+    });
+}
+
+window.selectCinematicCodec = function(codec) {
+    activeCinematicCodec = codec;
+    updateCinematicDisplay();
+};
+
+window.switchMoonlightTab = function(tabName) {
+    const isCinematic = (tabName === "cinematic");
+    document.getElementById("tab-btn-cinematic").classList.toggle("active", isCinematic);
+    document.getElementById("tab-btn-competitive").classList.toggle("active", !isCinematic);
+
+    document.getElementById("tab-content-cinematic").classList.toggle("hidden", !isCinematic);
+    document.getElementById("tab-content-competitive").classList.toggle("hidden", isCinematic);
+};
+
